@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FakeLocation — iPhone 定位控制台</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --line: #e3e6ea; --text: #1a1d21;
+    --muted: #6b7280; --blue: #2563eb; --amber: #d97706; --green: #16a34a; --red: #dc2626;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 15px/1.5 -apple-system, "PingFang SC", sans-serif; color: var(--text); background: var(--bg);
+         height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* 模拟中的警示条:不点恢复就一直在,防止忘记 */
+  #alert { display: none; background: var(--amber); color: #fff; padding: 10px 16px;
+           align-items: center; gap: 12px; font-weight: 600; }
+  #alert.on { display: flex; }
+  #alert button { margin-left: auto; background: #fff; color: var(--amber); border: 0;
+                  padding: 7px 16px; border-radius: 7px; font-weight: 700; cursor: pointer; font-size: 14px; }
+  #alert button:hover { background: #fff7ed; }
+
+  header { background: var(--panel); border-bottom: 1px solid var(--line);
+           padding: 12px 16px; display: flex; align-items: center; gap: 10px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #cbd5e1; flex-shrink: 0; }
+  .dot.ok { background: var(--green); }
+  #device { font-weight: 600; }
+  #hint { color: var(--muted); font-size: 13px; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  #map { flex: 1; }
+  aside { width: 330px; background: var(--panel); border-left: 1px solid var(--line);
+          padding: 18px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .coord { font: 600 15px/1.6 ui-monospace, SFMono-Regular, monospace; }
+  .coord small { display: block; font: 400 12px/1.4 -apple-system, sans-serif; color: var(--muted); }
+
+  label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 5px; }
+  input, select { width: 100%; padding: 9px 11px; border: 1px solid var(--line);
+                  border-radius: 7px; font-size: 14px; font-family: inherit; background: #fff; }
+  input:focus, select:focus { outline: 2px solid var(--blue); outline-offset: -1px; border-color: transparent; }
+
+  button.primary { width: 100%; padding: 12px; background: var(--blue); color: #fff; border: 0;
+                   border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button.primary:hover:not(:disabled) { background: #1d4ed8; }
+  button.primary:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  #msg { font-size: 13px; padding: 10px 12px; border-radius: 7px; display: none; }
+  #msg.on { display: block; }
+  #msg.err { background: #fef2f2; color: var(--red); }
+  #msg.ok { background: #f0fdf4; color: var(--green); }
+  .tip { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto; }
+</style>
+</head>
+<body>
+
+<div id="alert">
+  <span>⚠️ iPhone 当前是模拟定位 · <span id="alert-since"></span> 起</span>
+  <button onclick="restore()">恢复真实定位</button>
+</div>
+
+<header>
+  <span class="dot" id="dot"></span>
+  <span id="device">正在检测设备…</span>
+  <span id="hint"></span>
+</header>
+
+<main>
+  <div id="map"></div>
+  <aside>
+    <div>
+      <h2>目标位置</h2>
+      <div class="coord" id="picked">在地图上点一下选点<small>或在下方粘贴坐标</small></div>
+    </div>
+
+    <div>
+      <label>粘贴坐标(纬度, 经度)</label>
+      <div class="row">
+        <input id="paste" placeholder="31.2304, 121.4737">
+        <select id="datum" style="flex:0 0 128px">
+          <option value="gcj02">高德/腾讯</option>
+          <option value="wgs84">GPS/谷歌</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="primary" id="apply" onclick="apply()" disabled>设为 iPhone 定位</button>
+    <div id="msg"></div>
+
+    <p class="tip">
+      从高德、腾讯地图复制的坐标选「高德/腾讯」;从 GPS 设备、谷歌地图、维基百科复制的选「GPS/谷歌」。
+      选错会偏移约 500 米。<br><br>
+      拔掉数据线,iPhone 会自动恢复真实定位。
+    </p>
+  </aside>
+</main>
+
+<script>
+/* ---------- GCJ-02(火星坐标)与 WGS-84 互转 ----------
+   iPhone 只认 WGS-84。国内地图用 GCJ-02,不转换会偏移 300-500 米。
+   境外两者一致,算法自动跳过。 */
+const PI = 3.14159265358979324, A = 6378245.0, EE = 0.00669342162296594323;
+const outOfChina = (lat, lon) => !(lon > 73.66 && lon < 135.05 && lat > 3.86 && lat < 53.55);
+
+function tLat(x, y) {
+  let r = -100 + 2*x + 3*y + 0.2*y*y + 0.1*x*y + 0.2*Math.sqrt(Math.abs(x));
+  r += (20*Math.sin(6*x*PI) + 20*Math.sin(2*x*PI)) * 2/3;
+  r += (20*Math.sin(y*PI) + 40*Math.sin(y/3*PI)) * 2/3;
+  r += (160*Math.sin(y/12*PI) + 320*Math.sin(y*PI/30)) * 2/3;
+  return r;
+}
+function tLon(x, y) {
+  let r = 300 + x + 2*y + 0.1*x*x + 0.1*x*y + 0.1*Math.sqrt(Math.abs(x));
+  r += (20*Math.sin(6*x*PI) + 20*Math.sin(2*x*PI)) * 2/3;
+  r += (20*Math.sin(x*PI) + 40*Math.sin(x/3*PI)) * 2/3;
+  r += (150*Math.sin(x/12*PI) + 300*Math.sin(x/30*PI)) * 2/3;
+  return r;
+}
+function wgs2gcj(lat, lon) {
+  if (outOfChina(lat, lon)) return [lat, lon];
+  let dLat = tLat(lon - 105, lat - 35), dLon = tLon(lon - 105, lat - 35);
+  const rad = lat / 180 * PI, magic = 1 - EE * Math.sin(rad) ** 2, sq = Math.sqrt(magic);
+  dLat = (dLat * 180) / ((A * (1 - EE)) / (magic * sq) * PI);
+  dLon = (dLon * 180) / (A / sq * Math.cos(rad) * PI);
+  return [lat + dLat, lon + dLon];
+}
+function gcj2wgs(lat, lon) {
+  if (outOfChina(lat, lon)) return [lat, lon];
+  let wLat = lat, wLon = lon;
+  for (let i = 0; i < 5; i++) {            // 迭代反解,亚米级精度
+    const [gLat, gLon] = wgs2gcj(wLat, wLon);
+    wLat += lat - gLat;
+    wLon += lon - gLon;
+  }
+  return [wLat, wLon];
+}
+
+/* ---------- 地图 ----------
+   瓦片是高德的 GCJ-02 投影,所以画点前把 WGS-84 转成 GCJ-02 才能与底图对齐。
+   target 永远存 WGS-84,发给 iPhone 的也是它。 */
+let target = null, marker = null;
+
+const map = L.map('map', { zoomControl: true }).setView(wgs2gcj(31.2304, 121.4737), 12);
+L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+  subdomains: '1234', maxZoom: 18, attribution: '高德地图'
+}).addTo(map);
+
+map.on('click', e => pick(...gcj2wgs(e.latlng.lat, e.latlng.lng)));
+
+function pick(lat, lon, recenter = false) {
+  target = [lat, lon];
+  const [gLat, gLon] = wgs2gcj(lat, lon);
+  if (marker) marker.setLatLng([gLat, gLon]);
+  else marker = L.marker([gLat, gLon], { draggable: true })
+    .on('dragend', ev => { const p = ev.target.getLatLng(); pick(...gcj2wgs(p.lat, p.lng)); })
+    .addTo(map);
+  if (recenter) map.setView([gLat, gLon], Math.max(map.getZoom(), 14));
+
+  document.getElementById('picked').innerHTML =
+    `${lat.toFixed(6)}, ${lon.toFixed(6)}<small>WGS-84 · 将发送给 iPhone</small>`;
+  document.getElementById('apply').disabled = false;
+}
+
+/* 粘贴坐标:按所选坐标系换算成 WGS-84 */
+document.getElementById('paste').addEventListener('input', e => {
+  const m = e.target.value.match(/(-?\d+\.?\d*)\s*[,，\s]\s*(-?\d+\.?\d*)/);
+  if (!m) return;
+  let [lat, lon] = [parseFloat(m[1]), parseFloat(m[2])];
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+  if (document.getElementById('datum').value === 'gcj02') [lat, lon] = gcj2wgs(lat, lon);
+  pick(lat, lon, true);
+});
+document.getElementById('datum').addEventListener('change', () => {
+  document.getElementById('paste').dispatchEvent(new Event('input'));
+});
+
+/* ---------- 与后端交互 ---------- */
+function say(text, kind) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = 'on ' + kind;
+  if (kind === 'ok') setTimeout(() => el.className = '', 4000);
+}
+
+async function apply() {
+  if (!target) return;
+  const btn = document.getElementById('apply');
+  btn.disabled = true; btn.textContent = '正在设置…';
+  try {
+    const r = await fetch('/api/location', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ latitude: target[0], longitude: target[1] }),
+    });
+    const data = await r.json();
+    if (!r.ok) { say(`${data.message} — ${data.hint}`, 'err'); return; }
+    showActive(data.active);
+    say('已设置。打开 iPhone 的地图 App 看看。', 'ok');
+  } catch { say('后端没响应,请检查服务是否还在运行。', 'err'); }
+  finally { btn.disabled = false; btn.textContent = '设为 iPhone 定位'; }
+}
+
+async function restore() {
+  try {
+    const r = await fetch('/api/location/clear', { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) { say(`${data.message} — ${data.hint}`, 'err'); return; }
+    showActive(null);
+    say('已恢复。iPhone 会在几秒内回到真实定位。', 'ok');
+  } catch { say('后端没响应,请检查服务是否还在运行。', 'err'); }
+}
+
+function showActive(active) {
+  const bar = document.getElementById('alert');
+  bar.className = active ? 'on' : '';
+  if (active) document.getElementById('alert-since').textContent = active.since;
+}
+
+async function poll() {
+  try {
+    const { device, active } = await (await fetch('/api/status')).json();
+    document.getElementById('dot').className = 'dot' + (device.connected ? ' ok' : '');
+    if (device.connected) {
+      document.getElementById('device').textContent =
+        device.name + (device.ios_version ? ` · iOS ${device.ios_version}` : '');
+      document.getElementById('hint').textContent = '';
+    } else {
+      document.getElementById('device').textContent = device.message;
+      document.getElementById('hint').textContent = device.hint;
+    }
+    showActive(active);
+  } catch {
+    document.getElementById('dot').className = 'dot';
+    document.getElementById('device').textContent = '后端已断开';
+    document.getElementById('hint').textContent = '请在终端重新运行 ./start.sh';
+  }
+}
+poll();
+setInterval(poll, 3000);
+</script>
+</body>
+</html>
