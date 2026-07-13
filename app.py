@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import sys
@@ -18,15 +19,42 @@ import traceback
 import urllib.request
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent
-BACKEND = REPO / 'backend'
-TUNNELD_BIN = REPO / '.venv' / 'bin' / 'pymobiledevice3'
+# 冻结打包(PyInstaller)后,资源在 _MEIPASS 下;开发模式则在仓库根目录。
+FROZEN = bool(getattr(sys, 'frozen', False))
+if FROZEN:
+    RES = Path(getattr(sys, '_MEIPASS', None) or Path(sys.executable).resolve().parent)
+else:
+    RES = Path(__file__).resolve().parent
+
+BACKEND = RES / 'backend'
+ICNS = RES / 'FakeLocation.icns'
+TUNNELD_BIN = RES / '.venv' / 'bin' / 'pymobiledevice3'   # 仅开发模式使用
 TUNNELD_LOG = '/tmp/fakelocation-tunneld.log'
 APP_LOG = '/tmp/fakelocation-app.log'
 
 HOST, PORT = '127.0.0.1', 8765
 WEB_URL = f'http://{HOST}:{PORT}/'
 TUNNELD_URL = 'http://127.0.0.1:49151'
+
+
+def run_tunneld() -> None:
+    """以 root 运行 pymobiledevice3 隧道守护进程(USB-only)。
+
+    冻结包里没有独立的 pymobiledevice3 二进制,所以 App 用 --tunneld 自调用、
+    由 osascript 以 root 拉起。这里直接调程序化入口 TunneldRunner.create,
+    绕开 CLI(它会拖入 inquirer3 等交互式依赖)。
+    """
+    from pymobiledevice3.remote.common import TunnelProtocol
+    from pymobiledevice3.tunneld.api import TUNNELD_DEFAULT_ADDRESS
+    from pymobiledevice3.tunneld.server import TunneldRunner
+
+    host, port = TUNNELD_DEFAULT_ADDRESS
+    TunneldRunner.create(
+        host, port,
+        protocol=TunnelProtocol.DEFAULT,
+        usb_monitor=True, usbmux_monitor=True,   # USB 通道
+        wifi_monitor=False, mobdev2_monitor=False,
+    )
 
 
 def log(msg: str) -> None:
@@ -56,10 +84,11 @@ def ensure_tunnel() -> None:
     if _http_ok(TUNNELD_URL):
         return
 
-    shell_cmd = (
-        f'nohup {shlex.quote(str(TUNNELD_BIN))} remote tunneld '
-        f'> {shlex.quote(TUNNELD_LOG)} 2>&1 &'
-    )
+    if FROZEN:                           # 自调用 --tunneld(见 run_tunneld)
+        launcher = f'{shlex.quote(sys.executable)} --tunneld'
+    else:
+        launcher = f'{shlex.quote(str(TUNNELD_BIN))} remote tunneld'
+    shell_cmd = f'nohup {launcher} > {shlex.quote(TUNNELD_LOG)} 2>&1 &'
     prompt = 'FakeLocation 需要管理员权限来建立与 iPhone 的连接(只需这一次)。'
     script = (
         f'do shell script {_applescript_str(shell_cmd)} '
@@ -83,8 +112,10 @@ def ensure_tunnel() -> None:
 def start_backend() -> 'uvicorn.Server':
     import uvicorn
 
-    sys.path.insert(0, str(BACKEND))
-    import main  # noqa: E402  backend 应用
+    os.environ['FAKELOC_WEB'] = str(RES / 'web')   # 让后端找到网页目录
+    if BACKEND.is_dir():                            # 开发模式:把 backend 加进路径
+        sys.path.insert(0, str(BACKEND))
+    import main  # noqa: E402  backend 应用(冻结后由 PyInstaller 收录)
 
     config = uvicorn.Config(main.app, host=HOST, port=PORT, log_level='warning')
     server = uvicorn.Server(config)
@@ -103,15 +134,14 @@ def _brand_app() -> None:
     从 .app 里 exec 框架版 python,会让 NSBundle.mainBundle 指向 Python.app;
     若激活策略不是 Regular,Finder 启动时窗口会一闪即退。这里强制修正。
     """
-    icns = REPO / 'FakeLocation.icns'
     try:
         from AppKit import (NSApplication, NSApplicationActivationPolicyRegular,
                             NSImage)
         from Foundation import NSProcessInfo
         app = NSApplication.sharedApplication()
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
-        if icns.exists():
-            image = NSImage.alloc().initByReferencingFile_(str(icns))
+        if ICNS.exists():
+            image = NSImage.alloc().initByReferencingFile_(str(ICNS))
             if image is not None:
                 app.setApplicationIconImage_(image)
         NSProcessInfo.processInfo().setProcessName_('FakeLocation')
@@ -150,8 +180,11 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    try:
-        main()
-    except Exception:
-        log('!!! 未捕获异常:\n' + traceback.format_exc())
-        raise
+    if '--tunneld' in sys.argv:           # 以 root 被 osascript 拉起时走这里
+        run_tunneld()
+    else:
+        try:
+            main()
+        except Exception:
+            log('!!! 未捕获异常:\n' + traceback.format_exc())
+            raise

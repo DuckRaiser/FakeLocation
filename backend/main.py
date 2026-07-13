@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -14,7 +15,9 @@ from pydantic import BaseModel, Field
 import favorites
 from device import DeviceError, clear_location, get_status, set_location
 
-WEB_DIR = Path(__file__).resolve().parent.parent / 'web'
+# 冻结打包后 web 目录不在源码相对位置,由 app.py 通过 FAKELOC_WEB 指定;
+# 开发/直接跑 uvicorn 时回退到源码相对路径。
+WEB_DIR = Path(os.environ.get('FAKELOC_WEB') or Path(__file__).resolve().parent.parent / 'web')
 
 app = FastAPI(title='FakeLocation')
 

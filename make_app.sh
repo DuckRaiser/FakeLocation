@@ -21,7 +21,7 @@ fi
 
 echo "[1/3] 生成图标…"
 if "$VENV/bin/python" -c "import PIL" 2>/dev/null || "$VENV/bin/pip" install -q pillow; then
-  "$VENV/bin/python" build/make_icon.py "$ICNS" || echo "  图标生成失败,使用系统默认图标。"
+  "$VENV/bin/python" assets/make_icon.py "$ICNS" || echo "  图标生成失败,使用系统默认图标。"
 else
   echo "  Pillow 不可用,使用系统默认图标。"
 fi

@@ -27,6 +27,20 @@
 | **拔线之后** | 模拟定位自动失效,iPhone 回到真实定位。这是安全网。 |
 | **管理员密码** | iOS 17+ 建立隧道需要 root,启动时输一次。之后的操作都不需要。 |
 
+## 下载安装(Apple 芯片 Mac)
+
+到 [Releases](https://github.com/DuckRaiser/FakeLocation/releases) 下载 `FakeLocation.dmg` → 打开 → 把 `FakeLocation.app` 拖进「应用程序」。
+
+⚠️ **这个包没有 Apple 签名(需要 $99/年 开发者账号),所以首次打开会被 macOS 拦。** 在「终端」里跑一行解除隔离即可(只需一次):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/FakeLocation.app
+```
+
+之后双击 `FakeLocation.app` 就能正常用。仅支持 Apple 芯片(arm64)Mac。
+
+> 不想用下载的二进制?也可以 `git clone` 后自己 `./make_app.sh` 本地构建 —— 本地生成的 App 不会被 Gatekeeper 拦,无需上面这步。
+
 ## 使用
 
 **1. 开启 iPhone 开发者模式**(一次性)

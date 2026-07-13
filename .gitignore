@@ -5,3 +5,8 @@ __pycache__/
 FakeLocation.app/
 FakeLocation.icns
 *.iconset
+build/dist artifacts
+build/
+dist/
+*.spec
+*.dmg

@@ -1,7 +1,8 @@
 """生成 FakeLocation 的 .icns 图标。构建期用,运行时不依赖。
 
-用法:python build/make_icon.py <输出.icns 路径>
-需要 Pillow(make_app.sh 会自动装)。若环境缺失则以非零退出,构建脚本会跳过图标。
+用法:python assets/make_icon.py <输出.icns 路径>
+需要 Pillow(打包脚本会自动装)。若环境缺失则以非零退出,构建脚本会跳过图标。
+放在 assets/ 而非 build/,因为 build/ 是 PyInstaller 的工作目录,会被清空。
 """
 import subprocess
 import sys
