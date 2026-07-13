@@ -56,6 +56,26 @@
   #msg.err { background: #fef2f2; color: var(--red); }
   #msg.ok { background: #f0fdf4; color: var(--green); }
   .tip { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto; }
+
+  /* 收藏 */
+  .fav-list { display: flex; flex-direction: column; gap: 6px; }
+  .fav { display: flex; align-items: center; gap: 8px; padding: 9px 10px;
+         border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+  .fav:hover { border-color: var(--blue); background: #f8fafc; }
+  .fav .n { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fav .del { border: 0; background: transparent; color: var(--muted); cursor: pointer;
+              font-size: 15px; line-height: 1; padding: 3px 7px; border-radius: 5px; flex-shrink: 0; }
+  .fav .del:hover { background: #fef2f2; color: var(--red); }
+  .fav .del.arm { background: var(--red); color: #fff; font-size: 12px; font-weight: 600; }
+  .fav-empty { font-size: 12px; color: var(--muted); padding: 2px 0; }
+  .fav-add { display: none; gap: 8px; margin-top: 8px; }
+  .fav-add.on { display: flex; }
+  .fav-add button { flex: 0 0 52px; border: 1px solid var(--line); background: #fff;
+                    border-radius: 7px; cursor: pointer; font-size: 14px; }
+  button.ghost { width: 100%; margin-top: 8px; padding: 9px; background: #fff; color: var(--text);
+                 border: 1px solid var(--line); border-radius: 8px; font-size: 13px; cursor: pointer; }
+  button.ghost:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); }
+  button.ghost:disabled { color: #cbd5e1; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -77,6 +97,16 @@
     <div>
       <h2>目标位置</h2>
       <div class="coord" id="picked">在地图上点一下选点<small>或在下方粘贴坐标</small></div>
+    </div>
+
+    <div>
+      <h2>收藏</h2>
+      <div class="fav-list" id="favs"></div>
+      <div class="fav-add" id="fav-add">
+        <input id="fav-name" placeholder="起个名,如「家」" maxlength="40">
+        <button onclick="saveFav()">存</button>
+      </div>
+      <button class="ghost" id="fav-toggle" onclick="toggleFavAdd()" disabled>+ 收藏当前点</button>
     </div>
 
     <div>
@@ -165,6 +195,7 @@ function pick(lat, lon, recenter = false) {
   document.getElementById('picked').innerHTML =
     `${lat.toFixed(6)}, ${lon.toFixed(6)}<small>WGS-84 · 将发送给 iPhone</small>`;
   document.getElementById('apply').disabled = false;
+  document.getElementById('fav-toggle').disabled = false;
 }
 
 /* 粘贴坐标:按所选坐标系换算成 WGS-84 */
@@ -187,6 +218,76 @@ function say(text, kind) {
   el.className = 'on ' + kind;
   if (kind === 'ok') setTimeout(() => el.className = '', 4000);
 }
+
+/* ---------- 收藏 ---------- */
+let favs = [];
+const esc = s => s.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+async function loadFavs() {
+  try { favs = await (await fetch('/api/favorites')).json(); } catch { favs = []; }
+  renderFavs();
+}
+
+function renderFavs() {
+  const box = document.getElementById('favs');
+  if (!favs.length) {
+    box.innerHTML = '<div class="fav-empty">还没有收藏。选好点后按下方「收藏当前点」。</div>';
+    return;
+  }
+  box.innerHTML = '';
+  favs.forEach(f => {
+    const el = document.createElement('div');
+    el.className = 'fav';
+    el.title = `${f.latitude.toFixed(5)}, ${f.longitude.toFixed(5)}`;
+    el.onclick = () => { pick(f.latitude, f.longitude, true); say(`已载入「${f.name}」,按上方蓝色按钮设置。`, 'ok'); };
+    el.innerHTML = `<span class="n">${esc(f.name)}</span><button class="del" title="删除">×</button>`;
+    const del = el.querySelector('.del');
+    del.onclick = e => {                 // 二次确认防误删,不用弹窗
+      e.stopPropagation();
+      if (del.classList.contains('arm')) { delFav(f.id); return; }
+      del.classList.add('arm'); del.textContent = '删?';
+      setTimeout(() => { del.classList.remove('arm'); del.textContent = '×'; }, 2500);
+    };
+    box.appendChild(el);
+  });
+}
+
+function toggleFavAdd() {
+  if (!target) return;
+  const a = document.getElementById('fav-add');
+  a.classList.toggle('on');
+  if (a.classList.contains('on')) document.getElementById('fav-name').focus();
+}
+
+async function saveFav() {
+  if (!target) return;
+  const input = document.getElementById('fav-name');
+  const name = input.value.trim();
+  if (!name) { input.focus(); return; }
+  try {
+    const r = await fetch('/api/favorites', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, latitude: target[0], longitude: target[1] }),
+    });
+    if (!r.ok) { say('收藏失败,请重试。', 'err'); return; }
+    favs = await r.json();
+    renderFavs();
+    input.value = '';
+    document.getElementById('fav-add').classList.remove('on');
+    say(`已收藏「${name}」。`, 'ok');
+  } catch { say('收藏失败,后端没响应。', 'err'); }
+}
+
+async function delFav(id) {
+  try {
+    const r = await fetch('/api/favorites/' + id, { method: 'DELETE' });
+    if (!r.ok) { say('删除失败,请重试。', 'err'); return; }
+    favs = await r.json();
+    renderFavs();
+  } catch { say('删除失败,后端没响应。', 'err'); }
+}
+
+document.getElementById('fav-name').addEventListener('keydown', e => { if (e.key === 'Enter') saveFav(); });
 
 async function apply() {
   if (!target) return;
@@ -240,6 +341,7 @@ async function poll() {
     document.getElementById('hint').textContent = '请在终端重新运行 ./start.sh';
   }
 }
+loadFavs();
 poll();
 setInterval(poll, 3000);
 </script>

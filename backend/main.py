@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+import favorites
 from device import DeviceError, clear_location, get_status, set_location
 
 WEB_DIR = Path(__file__).resolve().parent.parent / 'web'
@@ -24,6 +25,10 @@ _active: dict | None = None
 class Coordinate(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
+
+
+class Favorite(Coordinate):
+    name: str = Field(min_length=1, max_length=40)
 
 
 def _error(exc: DeviceError) -> JSONResponse:
@@ -66,3 +71,18 @@ async def restore_location():
 
     _active = None
     return {'active': None}
+
+
+@app.get('/api/favorites')
+async def list_favorites() -> list[dict]:
+    return favorites.list_all()
+
+
+@app.post('/api/favorites')
+async def add_favorite(fav: Favorite) -> list[dict]:
+    return favorites.add(fav.name, fav.latitude, fav.longitude)
+
+
+@app.delete('/api/favorites/{fav_id}')
+async def delete_favorite(fav_id: str) -> list[dict]:
+    return favorites.remove(fav_id)

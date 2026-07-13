@@ -20,29 +20,40 @@
 ## 架构
 
 ```
-iPhone ──USB──► tunneld (sudo, 后台) ──RSD──► FastAPI 后端 ──HTTP──► 网页控制台
+iPhone ──USB──► tunneld (root, 持久) ──RSD──► FastAPI 后端 ──HTTP──► 网页 / 原生窗口
 ```
 
 - `tunneld` 是唯一需要 root 的进程,单独跑,不与业务代码混在一起。
 - 后端以普通权限运行,通过 tunneld 的本地 HTTP 接口拿到设备隧道地址。
+- 两种前端外壳,共用同一套后端与网页:
+  - `start.sh` → 浏览器(终端启动,sudo 起隧道)
+  - `FakeLocation.app` → 原生窗口(双击启动,osascript 原生密码框起隧道)
 
 ## 目录结构
 
 ```
 FakeLocation/
 ├── CLAUDE.md
-├── start.sh              # 一键启动(唯一入口)
+├── start.sh              # 终端一键启动(浏览器)
+├── make_app.sh           # 打包成 FakeLocation.app(原生窗口)
+├── app.py                # 原生 App 入口:起隧道 + 后端线程 + pywebview 窗口
 ├── requirements.txt
+├── build/
+│   └── make_icon.py      # 构建期图标生成(Pillow),运行时不依赖
 ├── backend/
 │   ├── main.py           # FastAPI 应用 + 路由
-│   └── device.py         # 设备发现与定位模拟的全部底层逻辑
+│   ├── device.py         # 设备发现与定位模拟的全部底层逻辑
+│   └── favorites.py      # 收藏位置的 JSON 存储(仓库外)
 └── web/
-    └── index.html        # 单页控制台(地图 + 设置/恢复按钮)
+    └── index.html        # 单页控制台(地图 + 收藏 + 设置/恢复)
 ```
 
 ## 约定
 
 - **底层设备操作只写在 `device.py`**,路由层不直接调 pymobiledevice3。
+- **收藏存到 `~/.fakelocation/favorites.json`(仓库外)**。家/公司坐标是隐私,绝不进 Git。原子写入。
 - **不引入前端构建工具**。单个 HTML 文件,浏览器直接打开,零构建。
+- **App 是本地构建产物**,不签名不公证(个人自用)。`FakeLocation.app` / `*.icns` 进 .gitignore,由 `make_app.sh` 从源码重建。
 - 后端固定 `127.0.0.1:8765`,只监听本地,不暴露到局域网。
+- 坐标一律 **WGS-84**;GCJ-02(国内地图)转换只在前端做,后端与存储都是 WGS-84。
 - 报错必须给出**下一步动作**,不能只报「失败」(例:「未检测到设备 → 请用数据线连接 iPhone 并在手机上点信任」)。
