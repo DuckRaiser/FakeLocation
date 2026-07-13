@@ -50,11 +50,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# 用 printf %q 把路径烤成 shell 安全的字面量,兼容含空格/$/反引号/反斜杠的路径。
+# printf %q 把路径烤成 shell 安全字面量,兼容含空格/$/反引号/反斜杠的路径。
+# arch -<本机架构> 强制原生架构启动:Finder 双击有时以 x86_64(Rosetta)拉起,
+# 导致 arm64 原生扩展(pydantic_core 等)加载失败而闪退。这一步是闪退的根治。
+ARCH="$(uname -m)"
 {
   printf '#!/bin/bash\n'
   printf '# 由 make_app.sh 生成。启动 FakeLocation 原生窗口。\n'
-  printf 'exec %q %q\n' "$VENV/bin/python" "$REPO/app.py"
+  printf 'exec arch -%s %q %q\n' "$ARCH" "$VENV/bin/python" "$REPO/app.py"
 } > "$APP/Contents/MacOS/FakeLocation"
 chmod +x "$APP/Contents/MacOS/FakeLocation"
 
