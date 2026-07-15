@@ -28,7 +28,8 @@ async def _acquire() -> RemoteServiceDiscoveryService:
     except TunneldConnectionError:
         raise DeviceError(
             '隧道服务未运行',
-            '请关掉这个服务,改用 ./start.sh 启动 —— 它会自动拉起隧道服务。',
+            '请完全退出后重新打开 FakeLocation(会弹出管理员密码框);'
+            '若用终端,请以 ./start.sh 启动 —— 它会自动拉起隧道服务。',
         )
 
     if not devices:

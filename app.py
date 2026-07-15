@@ -88,7 +88,9 @@ def ensure_tunnel() -> None:
         launcher = f'{shlex.quote(sys.executable)} --tunneld'
     else:
         launcher = f'{shlex.quote(str(TUNNELD_BIN))} remote tunneld'
-    shell_cmd = f'nohup {launcher} > {shlex.quote(TUNNELD_LOG)} 2>&1 &'
+    # 不能用 nohup:osascript 提权环境没有控制终端,macOS 的 nohup 会报
+    # "can't detach from console" 直接失败。< /dev/null + & 已足够脱离。
+    shell_cmd = f'{launcher} < /dev/null > {shlex.quote(TUNNELD_LOG)} 2>&1 &'
     prompt = 'FakeLocation 需要管理员权限来建立与 iPhone 的连接(只需这一次)。'
     script = (
         f'do shell script {_applescript_str(shell_cmd)} '
