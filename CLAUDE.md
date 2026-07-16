@@ -15,6 +15,7 @@
 | iOS 版本 | iOS 17+ 走 RemoteXPC 隧道(需 sudo);iOS 16- 走 DeveloperDiskImage。 |
 | 前提条件 | iPhone 必须开启「开发者模式」并与 Mac 配对信任。 |
 | "恢复定位" | = 清除模拟(`clear`),让 iPhone 重新用真实 GPS。**不是**写回旧坐标。 |
+| 模拟的存活 | **绑定在 DVT 连接上**:连接断开,iOS 几秒内自动回真实定位。因此 `device.py` 维持持久会话,set 后不许断开;关 App/后端/拔线 = 恢复真实。官方 CLI set 完也是挂起保持连接的。 |
 | 断开 USB | 模拟位置会失效,iPhone 自动回到真实定位。这是安全网,不是 bug。 |
 
 ## 架构
